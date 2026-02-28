@@ -1,6 +1,6 @@
 const { google } = require("googleapis");
 const cron = require("node-cron");
-const fetch = require("node-fetch"); // must be v2
+const fetch = require("node-fetch"); // v2 required
 require("dotenv").config();
 
 // ==============================
@@ -12,7 +12,17 @@ const TODO_SHEET_URL = process.env.TODO_SHEET_URL;
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const CHAT_ID = process.env.CHAT_ID;
 
-// Google credentials (separate Railway vars)
+// Extract Sheet IDs
+if (!SHEET_URL) throw new Error("SHEET_URL missing");
+if (!TODO_SHEET_URL) throw new Error("TODO_SHEET_URL missing");
+
+const SHEET_ID = SHEET_URL.match(/\/d\/([a-zA-Z0-9-_]+)/)[1];
+const TODO_SHEET_ID = TODO_SHEET_URL.match(/\/d\/([a-zA-Z0-9-_]+)/)[1];
+
+// ==============================
+// GOOGLE CREDENTIALS FROM ENV
+// ==============================
+
 const credentials = {
   type: process.env.type,
   project_id: process.env.project_id,
@@ -29,26 +39,13 @@ const credentials = {
   universe_domain: process.env.universe_domain,
 };
 
-// ==============================
-// VALIDATION
-// ==============================
-
-if (!SHEET_URL) throw new Error("SHEET_URL is missing");
-if (!TODO_SHEET_URL) throw new Error("TODO_SHEET_URL is missing");
-if (!BOT_TOKEN) throw new Error("BOT_TOKEN is missing");
-if (!CHAT_ID) throw new Error("CHAT_ID is missing");
-if (!credentials.private_key) throw new Error("Google private_key missing");
-
-const SHEET_ID = SHEET_URL.match(/\/d\/([a-zA-Z0-9-_]+)/)[1];
-const TODO_SHEET_ID = TODO_SHEET_URL.match(/\/d\/([a-zA-Z0-9-_]+)/)[1];
+if (!credentials.private_key) {
+  throw new Error("Google private_key missing");
+}
 
 async function main() {
   try {
     console.log("Running routine...");
-
-    // ==============================
-    // GOOGLE AUTH
-    // ==============================
 
     const auth = new google.auth.GoogleAuth({
       credentials,
@@ -60,10 +57,6 @@ async function main() {
 
     const sheets = google.sheets({ version: "v4", auth });
 
-    // ==============================
-    // READ CLASS SHEET
-    // ==============================
-
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: SHEET_ID,
       range: "Sheet1",
@@ -71,29 +64,19 @@ async function main() {
 
     const rows = response.data.values;
     if (!rows || rows.length === 0) {
-      console.log("No class data found.");
+      console.log("No data found.");
       return;
     }
 
     const headers = rows[0];
-
     const slots = headers.slice(1).map((header, i) => {
       const parts = header.split("\n").map((s) => s.trim());
-      return {
-        colIndex: i + 1,
-        slotName: parts[0] || "",
-        time: parts[1] || "",
-      };
+      return { colIndex: i + 1, slotName: parts[0] || "", time: parts[1] || "" };
     });
 
     const dayNames = [
-      "sunday",
-      "monday",
-      "tuesday",
-      "wednesday",
-      "thursday",
-      "friday",
-      "saturday",
+      "sunday","monday","tuesday","wednesday",
+      "thursday","friday","saturday"
     ];
 
     const dayGroups = {};
@@ -109,13 +92,8 @@ async function main() {
     }
 
     const days = [
-      "Sunday",
-      "Monday",
-      "Tuesday",
-      "Wednesday",
-      "Thursday",
-      "Friday",
-      "Saturday",
+      "Sunday","Monday","Tuesday","Wednesday",
+      "Thursday","Friday","Saturday"
     ];
 
     const today = days[new Date().getDay()];
@@ -143,32 +121,22 @@ async function main() {
               .map((s) => s.trim())
               .filter(Boolean)
               .join(", ");
-            todayClasses.push(
-              `${slot.slotName} > ${slot.time}: ${clean}`
-            );
+            todayClasses.push(`${slot.slotName} > ${slot.time}: ${clean}`);
             break;
           }
         }
       });
 
-      if (todayClasses.length === 0) {
-        finalMessage = `📅 ${today}, ${dateStr}\n\nNo classes scheduled today.`;
-      } else {
-        const classList = todayClasses
-          .map((cls, i) => `${i + 1}. ${cls}`)
-          .join("\n\n");
+      const classList = todayClasses
+        .map((cls, i) => `${i + 1}. ${cls}`)
+        .join("\n\n");
 
-        finalMessage = `📅 ${today}, ${dateStr}
+      finalMessage = `📅 ${today}, ${dateStr}
 
 Here is your class schedule:
 
 ${classList}`;
-      }
     }
-
-    // ==============================
-    // SEND TO TELEGRAM
-    // ==============================
 
     console.log("Sending to Telegram...");
 
@@ -197,13 +165,22 @@ ${classList}`;
   }
 }
 
-// Run immediately
+// Run once immediately
 main();
 
-// Run daily at 8 AM UTC
-cron.schedule("0 8 * * *", () => {
-  console.log("Running scheduled routine...");
-  main();
-});
+// ==============================
+// 8:00 AM BANGLADESH TIME
+// ==============================
 
-console.log("Bot running on Railway...");
+cron.schedule(
+  "0 8 * * *",
+  () => {
+    console.log("Running scheduled routine (Asia/Dhaka 8AM)...");
+    main();
+  },
+  {
+    timezone: "Asia/Dhaka",
+  }
+);
+
+console.log("Bot running on Railway (8AM Bangladesh time)...");
