@@ -11,7 +11,21 @@ const SHEET_URL = process.env.SHEET_URL;
 const TODO_SHEET_URL = process.env.TODO_SHEET_URL;
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const CHAT_ID = process.env.CHAT_ID;
-const GOOGLE_CREDENTIALS_JSON = process.env.GOOGLE_CREDENTIALS_JSON;
+
+// Google credentials (individual vars from Railway)
+const credentials = {
+  type: process.env.type,
+  project_id: process.env.project_id,
+  private_key_id: process.env.private_key_id,
+  private_key: process.env.private_key?.replace(/\\n/g, "\n"),
+  client_email: process.env.client_email,
+  client_id: process.env.client_id,
+  auth_uri: process.env.auth_uri,
+  token_uri: process.env.token_uri,
+  auth_provider_x509_cert_url: process.env.auth_provider_x509_cert_url,
+  client_x509_cert_url: process.env.client_x509_cert_url,
+  universe_domain: process.env.universe_domain,
+};
 
 // ==============================
 // VALIDATION
@@ -21,9 +35,9 @@ if (!SHEET_URL) throw new Error("SHEET_URL is missing");
 if (!TODO_SHEET_URL) throw new Error("TODO_SHEET_URL is missing");
 if (!BOT_TOKEN) throw new Error("BOT_TOKEN is missing");
 if (!CHAT_ID) throw new Error("CHAT_ID is missing");
-if (!GOOGLE_CREDENTIALS_JSON) throw new Error("GOOGLE_CREDENTIALS_JSON is missing");
 
-// Extract Sheet IDs
+if (!credentials.private_key) throw new Error("Google credentials missing");
+
 const SHEET_ID = SHEET_URL.match(/\/d\/([a-zA-Z0-9-_]+)/)[1];
 const TODO_SHEET_ID = TODO_SHEET_URL.match(/\/d\/([a-zA-Z0-9-_]+)/)[1];
 
@@ -32,10 +46,8 @@ async function main() {
     console.log("Running routine...");
 
     // ==============================
-    // GOOGLE AUTH (FROM ENV JSON)
+    // GOOGLE AUTH
     // ==============================
-
-    const credentials = JSON.parse(GOOGLE_CREDENTIALS_JSON);
 
     const auth = new google.auth.GoogleAuth({
       credentials,
@@ -78,9 +90,7 @@ async function main() {
         currentDay = firstCell;
         if (!dayGroups[currentDay]) dayGroups[currentDay] = [];
       }
-      if (currentDay) {
-        dayGroups[currentDay].push(rows[i]);
-      }
+      if (currentDay) dayGroups[currentDay].push(rows[i]);
     }
 
     const days = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
@@ -94,10 +104,9 @@ async function main() {
     });
 
     let finalMessage = "";
-    let hasClasses = false;
 
     if (todayRows.length === 0) {
-      finalMessage = `Today is ${today}, ${dateStr}. No classes scheduled for today.`;
+      finalMessage = `Today is ${today}, ${dateStr}. No classes scheduled.`;
     } else {
       const todayClasses = [];
 
@@ -113,9 +122,8 @@ async function main() {
       });
 
       if (todayClasses.length === 0) {
-        finalMessage = `Today is ${today}, ${dateStr}. No classes scheduled for today.`;
+        finalMessage = `Today is ${today}, ${dateStr}. No classes scheduled.`;
       } else {
-        hasClasses = true;
         const classList = todayClasses
           .map((cls, i) => `${i + 1}. ${cls}`)
           .join("\n\n");
@@ -128,49 +136,6 @@ Here is your class schedule:
 ${classList}`;
       }
     }
-
-    // ==============================
-    // READ TODO SHEET
-    // ==============================
-
-    const todoResponse = await sheets.spreadsheets.values.get({
-      spreadsheetId: TODO_SHEET_ID,
-      range: "Sheet1",
-    });
-
-    const todoRows = todoResponse.data.values;
-    let hasTodos = false;
-
-    if (todoRows && todoRows.length > 1) {
-      const headers = todoRows[0];
-      const tasks = todoRows.slice(1).map(row => {
-        const obj = {};
-        headers.forEach((h, i) => obj[h] = row[i] || "");
-        return obj;
-      });
-
-      if (tasks.length > 0) {
-        hasTodos = true;
-
-        const todoList = tasks.map((t, i) => {
-          let item = `${i + 1}. ${t["Task"]}`;
-          if (t["Note"]) item += ` (${t["Note"]})`;
-          if (t["Date"]) {
-            const d = new Date(t["Date"]);
-            item += ` - ${d.toLocaleDateString("en-US")}`;
-          }
-          return item;
-        }).join("\n\n");
-
-        finalMessage += `\n\n📝 To-Do List:\n\n${todoList}`;
-      }
-    }
-
-    if (!hasClasses && !hasTodos) {
-      finalMessage = `Today is ${today}, ${dateStr}. No classes and no tasks today. Enjoy your day!`;
-    }
-
-    console.log("Sending message...");
 
     // ==============================
     // SEND TO TELEGRAM
@@ -201,10 +166,8 @@ ${classList}`;
   }
 }
 
-// Run immediately
 main();
 
-// Schedule daily at 8 AM UTC
 cron.schedule("0 8 * * *", () => {
   console.log("Running scheduled task...");
   main();
