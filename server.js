@@ -40,9 +40,12 @@ async function main() {
     // READ GOOGLE SHEET
     // ==============================
 
-    const credentials = JSON.parse(
-      fs.readFileSync(path.resolve(__dirname, GOOGLE_CREDENTIALS_FILE), "utf8")
-    );
+
+    // Read Google credentials ONLY from environment variable (as JSON string)
+    if (!process.env.GOOGLE_CREDENTIALS_JSON) {
+      throw new Error('GOOGLE_CREDENTIALS_JSON environment variable is not set.');
+    }
+    const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON);
 
     const auth = new google.auth.GoogleAuth({
       credentials,
@@ -71,7 +74,7 @@ async function main() {
       const parts = header.split("\n").map((s) => s.trim());
       return { colIndex: i + 1, slotName: parts[0] || "", time: parts[1] || "" };
     });
-
+          const creds = JSON.parse(fs.readFileSync(path.resolve(__dirname, 'credentials.json'), 'utf8'));
     // Group rows by day (each day spans multiple rows; day name only in first row)
     const dayNames = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
     const dayGroups = {};
