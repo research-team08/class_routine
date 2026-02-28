@@ -1,6 +1,6 @@
 const { google } = require("googleapis");
 const cron = require("node-cron");
-const fetch = require("node-fetch"); // v2 required
+const https = require("https");
 require("dotenv").config();
 
 // ==============================
@@ -12,10 +12,12 @@ const TODO_SHEET_URL = process.env.TODO_SHEET_URL;
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const CHAT_ID = process.env.CHAT_ID;
 
-// Extract Sheet IDs
 if (!SHEET_URL) throw new Error("SHEET_URL missing");
 if (!TODO_SHEET_URL) throw new Error("TODO_SHEET_URL missing");
+if (!BOT_TOKEN) throw new Error("BOT_TOKEN missing");
+if (!CHAT_ID) throw new Error("CHAT_ID missing");
 
+// Extract Sheet IDs
 const SHEET_ID = SHEET_URL.match(/\/d\/([a-zA-Z0-9-_]+)/)[1];
 const TODO_SHEET_ID = TODO_SHEET_URL.match(/\/d\/([a-zA-Z0-9-_]+)/)[1];
 
@@ -42,6 +44,10 @@ const credentials = {
 if (!credentials.private_key) {
   throw new Error("Google private_key missing");
 }
+
+// ==============================
+// MAIN FUNCTION
+// ==============================
 
 async function main() {
   try {
@@ -71,12 +77,16 @@ async function main() {
     const headers = rows[0];
     const slots = headers.slice(1).map((header, i) => {
       const parts = header.split("\n").map((s) => s.trim());
-      return { colIndex: i + 1, slotName: parts[0] || "", time: parts[1] || "" };
+      return {
+        colIndex: i + 1,
+        slotName: parts[0] || "",
+        time: parts[1] || "",
+      };
     });
 
     const dayNames = [
-      "sunday","monday","tuesday","wednesday",
-      "thursday","friday","saturday"
+      "sunday","monday","tuesday",
+      "wednesday","thursday","friday","saturday"
     ];
 
     const dayGroups = {};
@@ -92,8 +102,8 @@ async function main() {
     }
 
     const days = [
-      "Sunday","Monday","Tuesday","Wednesday",
-      "Thursday","Friday","Saturday"
+      "Sunday","Monday","Tuesday",
+      "Wednesday","Thursday","Friday","Saturday"
     ];
 
     const today = days[new Date().getDay()];
@@ -121,7 +131,9 @@ async function main() {
               .map((s) => s.trim())
               .filter(Boolean)
               .join(", ");
-            todayClasses.push(`${slot.slotName} > ${slot.time}: ${clean}`);
+            todayClasses.push(
+              `${slot.slotName} > ${slot.time}: ${clean}`
+            );
             break;
           }
         }
@@ -138,38 +150,60 @@ Here is your class schedule:
 ${classList}`;
     }
 
+    // ==============================
+    // SEND TO TELEGRAM (NO FETCH)
+    // ==============================
+
     console.log("Sending to Telegram...");
 
-    const telegramResponse = await fetch(
-      `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chat_id: CHAT_ID,
-          text: finalMessage,
-        }),
-      }
-    );
+    const data = JSON.stringify({
+      chat_id: CHAT_ID,
+      text: finalMessage,
+    });
 
-    const result = await telegramResponse.json();
+    const options = {
+      hostname: "api.telegram.org",
+      path: `/bot${BOT_TOKEN}/sendMessage`,
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Content-Length": data.length,
+      },
+    };
 
-    if (!telegramResponse.ok) {
-      console.error("Telegram Error:", result);
-    } else {
-      console.log("Message sent successfully!");
-    }
+    const req = https.request(options, (res) => {
+      let body = "";
+
+      res.on("data", (chunk) => {
+        body += chunk;
+      });
+
+      res.on("end", () => {
+        if (res.statusCode === 200) {
+          console.log("Message sent successfully!");
+        } else {
+          console.error("Telegram Error:", body);
+        }
+      });
+    });
+
+    req.on("error", (error) => {
+      console.error("Request Error:", error);
+    });
+
+    req.write(data);
+    req.end();
 
   } catch (error) {
     console.error("Error:", error.message);
   }
 }
 
-// Run once immediately
+// Run once on deploy
 main();
 
 // ==============================
-// 8:00 AM BANGLADESH TIME
+// SCHEDULE: 8 AM BANGLADESH TIME
 // ==============================
 
 cron.schedule(
