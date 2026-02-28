@@ -1,61 +1,55 @@
 const { google } = require("googleapis");
-const fs = require("fs");
-const path = require("path");
 const cron = require("node-cron");
+const fetch = require("node-fetch");
 require("dotenv").config();
 
 // ==============================
-// CONFIGURATION (from .env)
+// ENV VARIABLES
 // ==============================
 
-const GOOGLE_CREDENTIALS_FILE = process.env.GOOGLE_CREDENTIALS_FILE || "credentials.json";
 const SHEET_URL = process.env.SHEET_URL;
 const TODO_SHEET_URL = process.env.TODO_SHEET_URL;
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const CHAT_ID = process.env.CHAT_ID;
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
+const GOOGLE_CREDENTIALS_JSON = process.env.GOOGLE_CREDENTIALS_JSON;
 
-// Extract spreadsheet IDs from the URLs
-if (!SHEET_URL) {
-  throw new Error('SHEET_URL environment variable is not set.');
-}
-const sheetMatch = SHEET_URL.match(/\/d\/([a-zA-Z0-9-_]+)/);
-if (!sheetMatch) {
-  throw new Error('Invalid SHEET_URL format. Could not extract Sheet ID.');
-}
-const SHEET_ID = sheetMatch[1];
+// ==============================
+// VALIDATION
+// ==============================
 
-if (!TODO_SHEET_URL) {
-  throw new Error('TODO_SHEET_URL environment variable is not set.');
-}
-const todoSheetMatch = TODO_SHEET_URL.match(/\/d\/([a-zA-Z0-9-_]+)/);
-if (!todoSheetMatch) {
-  throw new Error('Invalid TODO_SHEET_URL format. Could not extract Sheet ID.');
-}
-const TODO_SHEET_ID = todoSheetMatch[1];
+if (!SHEET_URL) throw new Error("SHEET_URL is missing");
+if (!TODO_SHEET_URL) throw new Error("TODO_SHEET_URL is missing");
+if (!BOT_TOKEN) throw new Error("BOT_TOKEN is missing");
+if (!CHAT_ID) throw new Error("CHAT_ID is missing");
+if (!GOOGLE_CREDENTIALS_JSON) throw new Error("GOOGLE_CREDENTIALS_JSON is missing");
+
+// Extract Sheet IDs
+const SHEET_ID = SHEET_URL.match(/\/d\/([a-zA-Z0-9-_]+)/)[1];
+const TODO_SHEET_ID = TODO_SHEET_URL.match(/\/d\/([a-zA-Z0-9-_]+)/)[1];
 
 async function main() {
   try {
+    console.log("Running routine...");
+
     // ==============================
-    // READ GOOGLE SHEET
+    // GOOGLE AUTH (FROM ENV JSON)
     // ==============================
 
-
-    // Read Google credentials ONLY from environment variable (as JSON string)
-    if (!process.env.GOOGLE_CREDENTIALS_JSON) {
-      throw new Error('GOOGLE_CREDENTIALS_JSON environment variable is not set.');
-    }
-    const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON);
+    const credentials = JSON.parse(GOOGLE_CREDENTIALS_JSON);
 
     const auth = new google.auth.GoogleAuth({
       credentials,
       scopes: [
-        "https://spreadsheets.google.com/feeds",
+        "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive",
       ],
     });
 
     const sheets = google.sheets({ version: "v4", auth });
+
+    // ==============================
+    // READ CLASS SHEET
+    // ==============================
 
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: SHEET_ID,
@@ -64,19 +58,17 @@ async function main() {
 
     const rows = response.data.values;
     if (!rows || rows.length === 0) {
-      console.log("No data found in the sheet.");
+      console.log("No class data found.");
       return;
     }
 
-    // Parse headers: extract slot name and time from each column header
     const headers = rows[0];
     const slots = headers.slice(1).map((header, i) => {
       const parts = header.split("\n").map((s) => s.trim());
       return { colIndex: i + 1, slotName: parts[0] || "", time: parts[1] || "" };
     });
-          const creds = JSON.parse(fs.readFileSync(path.resolve(__dirname, 'credentials.json'), 'utf8'));
-    // Group rows by day (each day spans multiple rows; day name only in first row)
-    const dayNames = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+
+    const dayNames = ["sunday","monday","tuesday","wednesday","thursday","friday","saturday"];
     const dayGroups = {};
     let currentDay = null;
 
@@ -91,10 +83,9 @@ async function main() {
       }
     }
 
-    const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    const days = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
     const today = days[new Date().getDay()];
-    const todayKey = today.toLowerCase();
-    const todayRows = dayGroups[todayKey] || [];
+    const todayRows = dayGroups[today.toLowerCase()] || [];
 
     const dateStr = new Date().toLocaleDateString("en-US", {
       year: "numeric",
@@ -108,24 +99,16 @@ async function main() {
     if (todayRows.length === 0) {
       finalMessage = `Today is ${today}, ${dateStr}. No classes scheduled for today.`;
     } else {
-      // Merge all rows for today: for each slot, pick the first non-empty cell
-      const slotData = {};
+      const todayClasses = [];
+
       slots.forEach((slot) => {
         for (const row of todayRows) {
-          const cellValue = (row[slot.colIndex] || "").trim();
-          if (cellValue) {
-            slotData[slot.colIndex] = { slot, cellValue };
+          const value = (row[slot.colIndex] || "").trim();
+          if (value) {
+            const clean = value.split("\n").map(s => s.trim()).filter(Boolean).join(", ");
+            todayClasses.push(`${slot.slotName} > ${slot.time}: ${clean}`);
             break;
           }
-        }
-      });
-
-      const todayClasses = [];
-      slots.forEach((slot) => {
-        const entry = slotData[slot.colIndex];
-        if (entry) {
-          const info = entry.cellValue.split("\n").map((s) => s.trim()).filter(Boolean).join(", ");
-          todayClasses.push(`${slot.slotName} > ${slot.time}: ${info}`);
         }
       });
 
@@ -136,12 +119,18 @@ async function main() {
         const classList = todayClasses
           .map((cls, i) => `${i + 1}. ${cls}`)
           .join("\n\n");
-        finalMessage = `Today is ${today}, ${dateStr}. Here is your class schedule for today:\n\n${classList}`;
+
+        finalMessage =
+`📅 ${today}, ${dateStr}
+
+Here is your class schedule:
+
+${classList}`;
       }
     }
 
     // ==============================
-    // READ TO-DO LIST
+    // READ TODO SHEET
     // ==============================
 
     const todoResponse = await sheets.spreadsheets.values.get({
@@ -150,79 +139,75 @@ async function main() {
     });
 
     const todoRows = todoResponse.data.values;
-    let todoText = "";
     let hasTodos = false;
 
     if (todoRows && todoRows.length > 1) {
-      const todoHeaders = todoRows[0];
-      const todos = todoRows.slice(1).map((row) => {
+      const headers = todoRows[0];
+      const tasks = todoRows.slice(1).map(row => {
         const obj = {};
-        todoHeaders.forEach((h, i) => {
-          obj[h] = row[i] || "";
-        });
+        headers.forEach((h, i) => obj[h] = row[i] || "");
         return obj;
       });
 
-      if (todos.length > 0) {
+      if (tasks.length > 0) {
         hasTodos = true;
-        const todoList = todos
-          .map((t, i) => {
-            let item = `${i + 1}. ${t["Task"]}`;
-            if (t["Note"]) item += ` (${t["Note"]})`;
-            if (t["Date"]) {
-              const d = new Date(t["Date"]);
-              const formatted = d.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
-              item += ` - Date: ${formatted}`;
-            }
-            return item;
-          })
-          .join("\n\n");
-        todoText = `\n\n\u{1F4DD} To-Do List:\n\n${todoList}`;
+
+        const todoList = tasks.map((t, i) => {
+          let item = `${i + 1}. ${t["Task"]}`;
+          if (t["Note"]) item += ` (${t["Note"]})`;
+          if (t["Date"]) {
+            const d = new Date(t["Date"]);
+            item += ` - ${d.toLocaleDateString("en-US")}`;
+          }
+          return item;
+        }).join("\n\n");
+
+        finalMessage += `\n\n📝 To-Do List:\n\n${todoList}`;
       }
     }
 
-    // Build final message
     if (!hasClasses && !hasTodos) {
-      finalMessage = `Today is ${today}, ${dateStr}. No classes and no tasks for today. Enjoy your day!`;
-    } else {
-      finalMessage += todoText;
+      finalMessage = `Today is ${today}, ${dateStr}. No classes and no tasks today. Enjoy your day!`;
     }
 
-    console.log("Message:\n" + finalMessage);
+    console.log("Sending message...");
 
     // ==============================
     // SEND TO TELEGRAM
     // ==============================
 
-    const telegramUrl = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
+    const telegramResponse = await fetch(
+      `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: CHAT_ID,
+          text: finalMessage,
+        }),
+      }
+    );
 
-    const telegramResponse = await fetch(telegramUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chat_id: CHAT_ID,
-        text: finalMessage,
-      }),
-    });
+    const result = await telegramResponse.json();
 
-    const telegramResult = await telegramResponse.json();
-    if (telegramResponse.ok) {
-      console.log("Message sent successfully!");
+    if (!telegramResponse.ok) {
+      console.error("Telegram Error:", result);
     } else {
-      console.error("Failed to send message:", JSON.stringify(telegramResult));
+      console.log("Message sent successfully!");
     }
+
   } catch (error) {
     console.error("Error:", error.message);
   }
 }
 
-// Run once immediately on start
+// Run immediately
 main();
 
-// Then run every day at 8:00 AM
+// Schedule daily at 8 AM UTC
 cron.schedule("0 8 * * *", () => {
-  console.log(`[${new Date().toLocaleString()}] Running scheduled routine...`);
+  console.log("Running scheduled task...");
   main();
 });
 
-console.log("Bot is running. Scheduled to send at 8:00 AM daily.");
+console.log("Bot running on Railway...");
