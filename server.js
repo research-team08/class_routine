@@ -16,8 +16,23 @@ const CHAT_ID = process.env.CHAT_ID;
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 
 // Extract spreadsheet IDs from the URLs
-const SHEET_ID = SHEET_URL.match(/\/d\/([a-zA-Z0-9-_]+)/)?.[1];
-const TODO_SHEET_ID = TODO_SHEET_URL.match(/\/d\/([a-zA-Z0-9-_]+)/)?.[1];
+if (!SHEET_URL) {
+  throw new Error('SHEET_URL environment variable is not set.');
+}
+const sheetMatch = SHEET_URL.match(/\/d\/([a-zA-Z0-9-_]+)/);
+if (!sheetMatch) {
+  throw new Error('Invalid SHEET_URL format. Could not extract Sheet ID.');
+}
+const SHEET_ID = sheetMatch[1];
+
+if (!TODO_SHEET_URL) {
+  throw new Error('TODO_SHEET_URL environment variable is not set.');
+}
+const todoSheetMatch = TODO_SHEET_URL.match(/\/d\/([a-zA-Z0-9-_]+)/);
+if (!todoSheetMatch) {
+  throw new Error('Invalid TODO_SHEET_URL format. Could not extract Sheet ID.');
+}
+const TODO_SHEET_ID = todoSheetMatch[1];
 
 async function main() {
   try {
