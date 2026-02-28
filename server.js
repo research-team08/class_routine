@@ -8,18 +8,15 @@ require("dotenv").config();
 // ==============================
 
 const SHEET_URL = process.env.SHEET_URL;
-const TODO_SHEET_URL = process.env.TODO_SHEET_URL;
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const CHAT_ID = process.env.CHAT_ID;
 
 if (!SHEET_URL) throw new Error("SHEET_URL missing");
-if (!TODO_SHEET_URL) throw new Error("TODO_SHEET_URL missing");
 if (!BOT_TOKEN) throw new Error("BOT_TOKEN missing");
 if (!CHAT_ID) throw new Error("CHAT_ID missing");
 
-// Extract Sheet IDs
+// Extract Sheet ID
 const SHEET_ID = SHEET_URL.match(/\/d\/([a-zA-Z0-9-_]+)/)[1];
-const TODO_SHEET_ID = TODO_SHEET_URL.match(/\/d\/([a-zA-Z0-9-_]+)/)[1];
 
 // ==============================
 // GOOGLE CREDENTIALS FROM ENV
@@ -70,89 +67,49 @@ async function main() {
 
     const rows = response.data.values;
     if (!rows || rows.length === 0) {
-      console.log("No data found.");
+      console.log("No data found in sheet.");
       return;
     }
 
     const headers = rows[0];
-    const slots = headers.slice(1).map((header, i) => {
-      const parts = header.split("\n").map((s) => s.trim());
-      return {
-        colIndex: i + 1,
-        slotName: parts[0] || "",
-        time: parts[1] || "",
-      };
-    });
-
-    const dayNames = [
-      "sunday","monday","tuesday",
-      "wednesday","thursday","friday","saturday"
-    ];
-
-    const dayGroups = {};
-    let currentDay = null;
-
-    for (let i = 1; i < rows.length; i++) {
-      const firstCell = (rows[i][0] || "").trim().toLowerCase();
-      if (dayNames.includes(firstCell)) {
-        currentDay = firstCell;
-        if (!dayGroups[currentDay]) dayGroups[currentDay] = [];
-      }
-      if (currentDay) dayGroups[currentDay].push(rows[i]);
-    }
+    const todayIndex = new Date().getDay();
 
     const days = [
       "Sunday","Monday","Tuesday",
       "Wednesday","Thursday","Friday","Saturday"
     ];
 
-    const today = days[new Date().getDay()];
-    const todayRows = dayGroups[today.toLowerCase()] || [];
-
+    const today = days[todayIndex];
     const dateStr = new Date().toLocaleDateString("en-US", {
       year: "numeric",
       month: "long",
       day: "numeric",
     });
 
-    let finalMessage = "";
+    let finalMessage = `📅 ${today}, ${dateStr}\n\n`;
 
-    if (todayRows.length === 0) {
-      finalMessage = `📅 ${today}, ${dateStr}\n\nNo classes scheduled today.`;
-    } else {
-      const todayClasses = [];
+    let hasData = false;
 
-      slots.forEach((slot) => {
-        for (const row of todayRows) {
-          const value = (row[slot.colIndex] || "").trim();
-          if (value) {
-            const clean = value
-              .split("\n")
-              .map((s) => s.trim())
-              .filter(Boolean)
-              .join(", ");
-            todayClasses.push(
-              `${slot.slotName} > ${slot.time}: ${clean}`
-            );
-            break;
+    for (let i = 1; i < rows.length; i++) {
+      const rowDay = (rows[i][0] || "").trim().toLowerCase();
+      if (rowDay === today.toLowerCase()) {
+        hasData = true;
+
+        for (let j = 1; j < headers.length; j++) {
+          if (rows[i][j]) {
+            finalMessage += `${headers[j]}: ${rows[i][j]}\n\n`;
           }
         }
-      });
-
-      const classList = todayClasses
-        .map((cls, i) => `${i + 1}. ${cls}`)
-        .join("\n\n");
-
-      finalMessage = `📅 ${today}, ${dateStr}
-
-Here is your class schedule:
-
-${classList}`;
+      }
     }
 
-    // ==============================
-    // SEND TO TELEGRAM (NO FETCH)
-    // ==============================
+    if (!hasData) {
+      finalMessage += "No classes scheduled today.";
+    }
+
+    if (!finalMessage.trim()) {
+      finalMessage = "No class schedule found for today.";
+    }
 
     console.log("Sending to Telegram...");
 
@@ -199,17 +156,14 @@ ${classList}`;
   }
 }
 
-// Run once on deploy
-main();
-
 // ==============================
-// SCHEDULE: 8 AM BANGLADESH TIME
+// SCHEDULE: 8:00 AM BANGLADESH TIME ONLY
 // ==============================
 
 cron.schedule(
   "0 8 * * *",
   () => {
-    console.log("Running scheduled routine (Asia/Dhaka 8AM)...");
+    console.log("Running scheduled routine (8AM Bangladesh)...");
     main();
   },
   {
@@ -217,4 +171,4 @@ cron.schedule(
   }
 );
 
-console.log("Bot running on Railway (8AM Bangladesh time)...");
+console.log("Bot running. Scheduled for 8:00 AM Bangladesh time only.");
