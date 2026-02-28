@@ -1,6 +1,6 @@
 const { google } = require("googleapis");
 const cron = require("node-cron");
-const fetch = require("node-fetch");
+const fetch = require("node-fetch"); // must be v2
 require("dotenv").config();
 
 // ==============================
@@ -12,12 +12,14 @@ const TODO_SHEET_URL = process.env.TODO_SHEET_URL;
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const CHAT_ID = process.env.CHAT_ID;
 
-// Google credentials (individual vars from Railway)
+// Google credentials (separate Railway vars)
 const credentials = {
   type: process.env.type,
   project_id: process.env.project_id,
   private_key_id: process.env.private_key_id,
-  private_key: process.env.private_key?.replace(/\\n/g, "\n"),
+  private_key: process.env.private_key
+    ? process.env.private_key.replace(/\\n/g, "\n")
+    : undefined,
   client_email: process.env.client_email,
   client_id: process.env.client_id,
   auth_uri: process.env.auth_uri,
@@ -35,8 +37,7 @@ if (!SHEET_URL) throw new Error("SHEET_URL is missing");
 if (!TODO_SHEET_URL) throw new Error("TODO_SHEET_URL is missing");
 if (!BOT_TOKEN) throw new Error("BOT_TOKEN is missing");
 if (!CHAT_ID) throw new Error("CHAT_ID is missing");
-
-if (!credentials.private_key) throw new Error("Google credentials missing");
+if (!credentials.private_key) throw new Error("Google private_key missing");
 
 const SHEET_ID = SHEET_URL.match(/\/d\/([a-zA-Z0-9-_]+)/)[1];
 const TODO_SHEET_ID = TODO_SHEET_URL.match(/\/d\/([a-zA-Z0-9-_]+)/)[1];
@@ -75,12 +76,26 @@ async function main() {
     }
 
     const headers = rows[0];
+
     const slots = headers.slice(1).map((header, i) => {
       const parts = header.split("\n").map((s) => s.trim());
-      return { colIndex: i + 1, slotName: parts[0] || "", time: parts[1] || "" };
+      return {
+        colIndex: i + 1,
+        slotName: parts[0] || "",
+        time: parts[1] || "",
+      };
     });
 
-    const dayNames = ["sunday","monday","tuesday","wednesday","thursday","friday","saturday"];
+    const dayNames = [
+      "sunday",
+      "monday",
+      "tuesday",
+      "wednesday",
+      "thursday",
+      "friday",
+      "saturday",
+    ];
+
     const dayGroups = {};
     let currentDay = null;
 
@@ -93,7 +108,16 @@ async function main() {
       if (currentDay) dayGroups[currentDay].push(rows[i]);
     }
 
-    const days = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+    const days = [
+      "Sunday",
+      "Monday",
+      "Tuesday",
+      "Wednesday",
+      "Thursday",
+      "Friday",
+      "Saturday",
+    ];
+
     const today = days[new Date().getDay()];
     const todayRows = dayGroups[today.toLowerCase()] || [];
 
@@ -106,7 +130,7 @@ async function main() {
     let finalMessage = "";
 
     if (todayRows.length === 0) {
-      finalMessage = `Today is ${today}, ${dateStr}. No classes scheduled.`;
+      finalMessage = `📅 ${today}, ${dateStr}\n\nNo classes scheduled today.`;
     } else {
       const todayClasses = [];
 
@@ -114,22 +138,27 @@ async function main() {
         for (const row of todayRows) {
           const value = (row[slot.colIndex] || "").trim();
           if (value) {
-            const clean = value.split("\n").map(s => s.trim()).filter(Boolean).join(", ");
-            todayClasses.push(`${slot.slotName} > ${slot.time}: ${clean}`);
+            const clean = value
+              .split("\n")
+              .map((s) => s.trim())
+              .filter(Boolean)
+              .join(", ");
+            todayClasses.push(
+              `${slot.slotName} > ${slot.time}: ${clean}`
+            );
             break;
           }
         }
       });
 
       if (todayClasses.length === 0) {
-        finalMessage = `Today is ${today}, ${dateStr}. No classes scheduled.`;
+        finalMessage = `📅 ${today}, ${dateStr}\n\nNo classes scheduled today.`;
       } else {
         const classList = todayClasses
           .map((cls, i) => `${i + 1}. ${cls}`)
           .join("\n\n");
 
-        finalMessage =
-`📅 ${today}, ${dateStr}
+        finalMessage = `📅 ${today}, ${dateStr}
 
 Here is your class schedule:
 
@@ -140,6 +169,8 @@ ${classList}`;
     // ==============================
     // SEND TO TELEGRAM
     // ==============================
+
+    console.log("Sending to Telegram...");
 
     const telegramResponse = await fetch(
       `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`,
@@ -166,10 +197,12 @@ ${classList}`;
   }
 }
 
+// Run immediately
 main();
 
+// Run daily at 8 AM UTC
 cron.schedule("0 8 * * *", () => {
-  console.log("Running scheduled task...");
+  console.log("Running scheduled routine...");
   main();
 });
 
