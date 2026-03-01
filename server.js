@@ -242,14 +242,24 @@ function buildTodoList(rows) {
 
     const task    = row[0] ? String(row[0]).trim() : "";
     const note    = row[1] ? String(row[1]).trim() : "";
-    const dueDate = row[2] ? String(row[2]).trim() : "";
+    const rawDate = row[2] ? String(row[2]).trim() : "";
 
     if (!task) continue;
 
     taskNumber++;
     section += `${taskNumber}. ${task}\n`;
     if (note)    section += `   Note: ${note}\n`;
-    if (dueDate) section += `   Date: ${dueDate}\n`;
+    if (rawDate) {
+      const MONTHS = [
+        "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December",
+      ];
+      const parsed = new Date(rawDate);
+      const dueDate = isNaN(parsed.getTime())
+        ? rawDate
+        : `${MONTHS[parsed.getMonth()]} ${parsed.getDate()}, ${parsed.getFullYear()}`;
+      section += `   Date: ${dueDate}\n`;
+    }
     section += "\n";
   }
 
@@ -301,7 +311,7 @@ function sendTelegramMessage(text) {
 }
 
 cron.schedule(
-  "38 14 * * *",
+  "41 14 * * *",
   () => {
     console.log("Running scheduled routine (8:00 AM Bangladesh)...");
     main();
