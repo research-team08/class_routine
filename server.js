@@ -330,7 +330,7 @@ async function main() {
 // ==============================
 
 cron.schedule(
-  "0 8 * * *",
+  "52 11 * * *",
   () => {
     console.log("Running scheduled routine (8AM Bangladesh)...");
     main();
@@ -370,7 +370,4 @@ const server = http.createServer((req, res) => {
 server.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);
   console.log("Bot running. Scheduled for 8:00 AM Bangladesh time.");
-  // Send message immediately on deploy to verify it works
-  console.log("Sending initial message on startup...");
-  main();
 });
