@@ -330,7 +330,7 @@ async function main() {
 // ==============================
 
 cron.schedule(
-  "0 8 * * *",
+  "46 12 * * *",
   () => {
     console.log("Running scheduled routine (8AM Bangladesh)...");
     main();
