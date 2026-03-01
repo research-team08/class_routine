@@ -9,9 +9,12 @@ require("dotenv").config();
 // ==============================
 
 const SHEET_URL = process.env.SHEET_URL;
+const TODO_SHEET_URL = process.env.TODO_SHEET_URL;
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const CHAT_ID = process.env.CHAT_ID;
 const SHEET_RANGE = process.env.SHEET_RANGE || "Sheet1!A:Z";
+const TODO_SHEET_RANGE = process.env.TODO_SHEET_RANGE || "Sheet1!A:Z";
+const TEST_TRIGGER_TOKEN = process.env.TEST_TRIGGER_TOKEN;
 
 if (!SHEET_URL) throw new Error("SHEET_URL missing");
 if (!BOT_TOKEN) throw new Error("BOT_TOKEN missing");
@@ -33,6 +36,7 @@ function extractSheetId(input) {
 }
 
 const SHEET_ID = extractSheetId(SHEET_URL);
+const TODO_SHEET_ID = extractSheetId(TODO_SHEET_URL);
 
 if (!SHEET_ID) {
   throw new Error(
@@ -40,11 +44,23 @@ if (!SHEET_ID) {
   );
 }
 
+if (TODO_SHEET_URL && !TODO_SHEET_ID) {
+  console.warn("Warning: TODO_SHEET_URL provided but invalid. To-do feature disabled.");
+}
+
 // ==============================
 // GOOGLE CREDENTIALS FROM ENV
 // ==============================
 
-// Try to parse GOOGLE_CREDENTIALS if provided as a single JSON string
+const fs = require("fs");
+const path = require("path");
+
+// Try to load credentials in priority order:
+// 1. GOOGLE_CREDENTIALS (JSON string)
+// 2. GOOGLE_CREDENTIALS_FILE (path to JSON file)
+// 3. Local credentials.json file
+// 4. Individual env vars (GOOGLE_PRIVATE_KEY, etc.)
+
 let credentials;
 
 if (process.env.GOOGLE_CREDENTIALS) {
@@ -56,26 +72,62 @@ if (process.env.GOOGLE_CREDENTIALS) {
   }
 }
 
+if (!credentials && process.env.GOOGLE_CREDENTIALS_FILE) {
+  try {
+    const credPath = path.resolve(process.env.GOOGLE_CREDENTIALS_FILE);
+    const raw = fs.readFileSync(credPath, "utf8");
+    credentials = JSON.parse(raw);
+    console.log("Loaded credentials from file:", credPath);
+  } catch (e) {
+    console.error("Failed to load GOOGLE_CREDENTIALS_FILE:", e.message);
+  }
+}
+
+// Try loading from local credentials.json file
+if (!credentials) {
+  const localCredPath = path.join(__dirname, "credentials.json");
+  if (fs.existsSync(localCredPath)) {
+    try {
+      const raw = fs.readFileSync(localCredPath, "utf8");
+      credentials = JSON.parse(raw);
+      console.log("Loaded credentials from local credentials.json file.");
+    } catch (e) {
+      console.error("Failed to load local credentials.json:", e.message);
+    }
+  }
+}
+
 if (!credentials) {
   credentials = {
-    type: process.env.type,
-    project_id: process.env.project_id,
-    private_key_id: process.env.private_key_id,
-    private_key: process.env.private_key
-      ? process.env.private_key.replace(/\\n/g, "\n")
+    type: process.env.GOOGLE_TYPE || process.env.type,
+    project_id: process.env.GOOGLE_PROJECT_ID || process.env.project_id,
+    private_key_id:
+      process.env.GOOGLE_PRIVATE_KEY_ID || process.env.private_key_id,
+    private_key: (process.env.GOOGLE_PRIVATE_KEY || process.env.private_key)
+      ? (process.env.GOOGLE_PRIVATE_KEY || process.env.private_key).replace(
+          /\\n/g,
+          "\n"
+        )
       : undefined,
-    client_email: process.env.client_email,
-    client_id: process.env.client_id,
-    auth_uri: process.env.auth_uri,
-    token_uri: process.env.token_uri,
-    auth_provider_x509_cert_url: process.env.auth_provider_x509_cert_url,
-    client_x509_cert_url: process.env.client_x509_cert_url,
-    universe_domain: process.env.universe_domain,
+    client_email: process.env.GOOGLE_CLIENT_EMAIL || process.env.client_email,
+    client_id: process.env.GOOGLE_CLIENT_ID || process.env.client_id,
+    auth_uri: process.env.GOOGLE_AUTH_URI || process.env.auth_uri,
+    token_uri: process.env.GOOGLE_TOKEN_URI || process.env.token_uri,
+    auth_provider_x509_cert_url:
+      process.env.GOOGLE_AUTH_PROVIDER_X509_CERT_URL ||
+      process.env.auth_provider_x509_cert_url,
+    client_x509_cert_url:
+      process.env.GOOGLE_CLIENT_X509_CERT_URL ||
+      process.env.client_x509_cert_url,
+    universe_domain:
+      process.env.GOOGLE_UNIVERSE_DOMAIN || process.env.universe_domain,
   };
 }
 
-if (!credentials.private_key) {
-  throw new Error("Google private_key missing");
+if (!credentials.private_key || !credentials.client_email || !credentials.project_id) {
+  throw new Error(
+    "Google credentials incomplete. Provide GOOGLE_CREDENTIALS JSON or required env fields."
+  );
 }
 
 // Log which credentials loaded (without exposing secrets)
@@ -100,28 +152,11 @@ async function main() {
 
     const sheets = google.sheets({ version: "v4", auth });
 
-    const response = await sheets.spreadsheets.values.get({
-      spreadsheetId: SHEET_ID,
-      range: SHEET_RANGE,
-      majorDimension: "ROWS",
-      valueRenderOption: "UNFORMATTED_VALUE",
-      dateTimeRenderOption: "FORMATTED_STRING",
-    });
-
-    const rows = response.data.values;
-    if (!rows || rows.length === 0) {
-      console.log("No data found in sheet.");
-      return;
-    }
-
-    const headers = rows[0];
     const todayIndex = new Date().getDay();
-
     const days = [
       "Sunday","Monday","Tuesday",
       "Wednesday","Thursday","Friday","Saturday"
     ];
-
     const today = days[todayIndex];
     const dateStr = new Date().toLocaleDateString("en-US", {
       year: "numeric",
@@ -129,29 +164,116 @@ async function main() {
       day: "numeric",
     });
 
-    let finalMessage = `📅 ${today}, ${dateStr}\n\n`;
+    let finalMessage = `Today is ${today}, ${dateStr}.\n\n`;
 
-    let hasData = false;
+    // ===== CLASS SCHEDULE =====
+    const routineResponse = await sheets.spreadsheets.values.get({
+      spreadsheetId: SHEET_ID,
+      range: SHEET_RANGE,
+      majorDimension: "ROWS",
+      valueRenderOption: "UNFORMATTED_VALUE",
+      dateTimeRenderOption: "FORMATTED_STRING",
+    });
 
-    for (let i = 1; i < rows.length; i++) {
-      const rowDay = (rows[i][0] || "").trim().toLowerCase();
-      if (rowDay === today.toLowerCase()) {
-        hasData = true;
-
-        for (let j = 1; j < headers.length; j++) {
-          if (rows[i][j]) {
-            finalMessage += `${headers[j]}: ${rows[i][j]}\n\n`;
+    const rows = routineResponse.data.values;
+    let hasClasses = false;
+    
+    if (rows && rows.length > 0) {
+      const headers = rows[0];
+      let classesForToday = [];
+      let inTodaySection = false;
+      
+      for (let i = 1; i < rows.length; i++) {
+        const rowDay = (rows[i][0] || "").trim().toLowerCase();
+        const isNewDayMarker = days.some(d => d.toLowerCase() === rowDay);
+        
+        if (isNewDayMarker) {
+          inTodaySection = (rowDay === today.toLowerCase());
+        }
+        
+        if (inTodaySection) {
+          for (let j = 1; j < headers.length; j++) {
+            if (rows[i][j]) {
+              hasClasses = true;
+              const headerParts = headers[j].split('\n');
+              const slotName = headerParts[0] ? headerParts[0].trim() : "";
+              const timeSlot = headerParts[1] ? headerParts[1].trim() : "";
+              
+              const cellContent = String(rows[i][j]).trim();
+              const lines = cellContent.split('\n').map(l => l.trim()).filter(l => l);
+              
+              classesForToday.push({
+                slotNum: j,
+                slotName,
+                timeSlot,
+                teacher: lines[0] || "",
+                courseCode: lines[1] || "",
+                room: lines[2] || ""
+              });
+            }
           }
         }
       }
+      
+      classesForToday.sort((a, b) => a.slotNum - b.slotNum);
+      
+      if (hasClasses) {
+        finalMessage += `CLASS SCHEDULE:\n`;
+        finalMessage += `---------------\n`;
+        let classNumber = 0;
+        for (const cls of classesForToday) {
+          classNumber++;
+          finalMessage += `${classNumber}. ${cls.slotName} > ${cls.timeSlot}\n`;
+          finalMessage += `${cls.teacher}, ${cls.courseCode}, ${cls.room}\n\n`;
+        }
+      } else {
+        finalMessage += `CLASS SCHEDULE:\n`;
+        finalMessage += `---------------\n`;
+        finalMessage += `No classes scheduled for today.\n\n`;
+      }
     }
 
-    if (!hasData) {
-      finalMessage += "No classes scheduled today.";
-    }
+    // ===== TO-DO LIST =====
+    if (TODO_SHEET_ID) {
+      const todoResponse = await sheets.spreadsheets.values.get({
+        spreadsheetId: TODO_SHEET_ID,
+        range: TODO_SHEET_RANGE,
+        majorDimension: "ROWS",
+        valueRenderOption: "UNFORMATTED_VALUE",
+        dateTimeRenderOption: "FORMATTED_STRING",
+      });
 
-    if (!finalMessage.trim()) {
-      finalMessage = "No class schedule found for today.";
+      const todoRows = todoResponse.data.values;
+      
+      finalMessage += `TO-DO LIST:\n`;
+      finalMessage += `---------------\n`;
+      
+      let hasTasks = false;
+      let taskNumber = 0;
+      
+      if (todoRows && todoRows.length > 1) {
+        for (let i = 1; i < todoRows.length; i++) {
+          const row = todoRows[i];
+          if (row && row.length > 0) {
+            const task = row[0] ? String(row[0]).trim() : "";
+            const note = row[1] ? String(row[1]).trim() : "";
+            const dueDate = row[2] ? String(row[2]).trim() : "";
+            
+            if (task) {
+              hasTasks = true;
+              taskNumber++;
+              finalMessage += `${taskNumber}. ${task}\n`;
+              if (note) finalMessage += `   Note: ${note}\n`;
+              if (dueDate) finalMessage += `   Date: ${dueDate}\n`;
+              finalMessage += `\n`;
+            }
+          }
+        }
+      }
+      
+      if (!hasTasks) {
+        finalMessage += `No pending tasks.\n`;
+      }
     }
 
     console.log("Sending to Telegram...");
@@ -198,7 +320,7 @@ async function main() {
     const details = error?.response?.data || error?.message || String(error);
     console.error("Error reading/sending routine:", details);
     console.error(
-      "Hints: ensure the sheet is shared with service account email, SHEET_RANGE is correct, and credentials are valid."
+      "Hints: ensure the sheets are shared with service account email and ranges are correct."
     );
   }
 }
@@ -208,7 +330,7 @@ async function main() {
 // ==============================
 
 cron.schedule(
-  "02 11 * * *",
+  "0 8 * * *",
   () => {
     console.log("Running scheduled routine (8AM Bangladesh)...");
     main();
@@ -226,6 +348,16 @@ const PORT = process.env.PORT || 3000;
 
 const server = http.createServer((req, res) => {
   if (req.url === "/test") {
+    if (TEST_TRIGGER_TOKEN) {
+      const authHeader = req.headers["authorization"] || "";
+      const expected = `Bearer ${TEST_TRIGGER_TOKEN}`;
+      if (authHeader !== expected) {
+        res.writeHead(401, { "Content-Type": "text/plain" });
+        res.end("Unauthorized");
+        return;
+      }
+    }
+
     main();
     res.writeHead(200, { "Content-Type": "text/plain" });
     res.end("Message triggered manually!");
@@ -242,4 +374,3 @@ server.listen(PORT, () => {
   console.log("Sending initial message on startup...");
   main();
 });
-
