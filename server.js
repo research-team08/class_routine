@@ -311,7 +311,7 @@ function sendTelegramMessage(text) {
 }
 
 cron.schedule(
-  "41 14 * * *",
+  "0 8 * * *",
   () => {
     console.log("Running scheduled routine (8:00 AM Bangladesh)...");
     main();
