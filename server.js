@@ -73,13 +73,17 @@ if (process.env.GOOGLE_CREDENTIALS) {
 }
 
 if (!credentials && process.env.GOOGLE_CREDENTIALS_FILE) {
-  try {
-    const credPath = path.resolve(process.env.GOOGLE_CREDENTIALS_FILE);
-    const raw = fs.readFileSync(credPath, "utf8");
-    credentials = JSON.parse(raw);
-    console.log("Loaded credentials from file:", credPath);
-  } catch (e) {
-    console.error("Failed to load GOOGLE_CREDENTIALS_FILE:", e.message);
+  const credPath = path.resolve(process.env.GOOGLE_CREDENTIALS_FILE);
+  if (fs.existsSync(credPath)) {
+    try {
+      const raw = fs.readFileSync(credPath, "utf8");
+      credentials = JSON.parse(raw);
+      console.log("Loaded credentials from file:", credPath);
+    } catch (e) {
+      console.error("Failed to parse GOOGLE_CREDENTIALS_FILE:", e.message);
+    }
+  } else {
+    console.warn("GOOGLE_CREDENTIALS_FILE not found, skipping:", credPath);
   }
 }
 
@@ -371,6 +375,4 @@ server.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);
   console.log("Bot running. Scheduled for 8:00 AM Bangladesh time.");
 });
-
-
 
