@@ -218,7 +218,7 @@ async function main() {
       classesForToday.sort((a, b) => a.slotNum - b.slotNum);
       
       if (hasClasses) {
-        finalMessage += `CLASS SCHEDULE:\n`;
+        finalMessage += `Class Schedule:\n`;
         finalMessage += `---------------\n`;
         let classNumber = 0;
         for (const cls of classesForToday) {
@@ -227,7 +227,7 @@ async function main() {
           finalMessage += `${cls.teacher}, ${cls.courseCode}, ${cls.room}\n\n`;
         }
       } else {
-        finalMessage += `CLASS SCHEDULE:\n`;
+        finalMessage += `Class Schedule:\n`;
         finalMessage += `---------------\n`;
         finalMessage += `No classes scheduled for today.\n\n`;
       }
@@ -245,7 +245,7 @@ async function main() {
 
       const todoRows = todoResponse.data.values;
       
-      finalMessage += `TO-DO LIST:\n`;
+      finalMessage += `TO-DO List:\n`;
       finalMessage += `---------------\n`;
       
       let hasTasks = false;
@@ -330,7 +330,7 @@ async function main() {
 // ==============================
 
 cron.schedule(
-  "52 11 * * *",
+  "0 8 * * *",
   () => {
     console.log("Running scheduled routine (8AM Bangladesh)...");
     main();
@@ -371,3 +371,4 @@ server.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);
   console.log("Bot running. Scheduled for 8:00 AM Bangladesh time.");
 });
+
