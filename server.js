@@ -11,13 +11,34 @@ require("dotenv").config();
 const SHEET_URL = process.env.SHEET_URL;
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const CHAT_ID = process.env.CHAT_ID;
+const SHEET_RANGE = process.env.SHEET_RANGE || "Sheet1!A:Z";
 
 if (!SHEET_URL) throw new Error("SHEET_URL missing");
 if (!BOT_TOKEN) throw new Error("BOT_TOKEN missing");
 if (!CHAT_ID) throw new Error("CHAT_ID missing");
 
-// Extract Sheet ID
-const SHEET_ID = SHEET_URL.match(/\/d\/([a-zA-Z0-9-_]+)/)[1];
+// Extract Sheet ID safely from both full URLs and raw IDs
+function extractSheetId(input) {
+  if (!input) return null;
+  const trimmed = input.trim();
+
+  const match = trimmed.match(/\/d\/([a-zA-Z0-9-_]+)/);
+  if (match?.[1]) return match[1];
+
+  if (/^[a-zA-Z0-9-_]{20,}$/.test(trimmed)) {
+    return trimmed;
+  }
+
+  return null;
+}
+
+const SHEET_ID = extractSheetId(SHEET_URL);
+
+if (!SHEET_ID) {
+  throw new Error(
+    "Invalid SHEET_URL. Provide full Google Sheet URL or a valid spreadsheet ID."
+  );
+}
 
 // ==============================
 // GOOGLE CREDENTIALS FROM ENV
@@ -81,7 +102,10 @@ async function main() {
 
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: SHEET_ID,
-      range: "Sheet1",
+      range: SHEET_RANGE,
+      majorDimension: "ROWS",
+      valueRenderOption: "UNFORMATTED_VALUE",
+      dateTimeRenderOption: "FORMATTED_STRING",
     });
 
     const rows = response.data.values;
@@ -171,7 +195,11 @@ async function main() {
     req.end();
 
   } catch (error) {
-    console.error("Error:", error.message);
+    const details = error?.response?.data || error?.message || String(error);
+    console.error("Error reading/sending routine:", details);
+    console.error(
+      "Hints: ensure the sheet is shared with service account email, SHEET_RANGE is correct, and credentials are valid."
+    );
   }
 }
 
@@ -180,7 +208,7 @@ async function main() {
 // ==============================
 
 cron.schedule(
-  "55 10 * * *",
+  "02 11 * * *",
   () => {
     console.log("Running scheduled routine (8AM Bangladesh)...");
     main();
