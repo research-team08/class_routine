@@ -1,6 +1,7 @@
 const { google } = require("googleapis");
 const cron = require("node-cron");
 const https = require("https");
+const http = require("http");
 require("dotenv").config();
 
 // ==============================
@@ -22,25 +23,43 @@ const SHEET_ID = SHEET_URL.match(/\/d\/([a-zA-Z0-9-_]+)/)[1];
 // GOOGLE CREDENTIALS FROM ENV
 // ==============================
 
-const credentials = {
-  type: process.env.type,
-  project_id: process.env.project_id,
-  private_key_id: process.env.private_key_id,
-  private_key: process.env.private_key
-    ? process.env.private_key.replace(/\\n/g, "\n")
-    : undefined,
-  client_email: process.env.client_email,
-  client_id: process.env.client_id,
-  auth_uri: process.env.auth_uri,
-  token_uri: process.env.token_uri,
-  auth_provider_x509_cert_url: process.env.auth_provider_x509_cert_url,
-  client_x509_cert_url: process.env.client_x509_cert_url,
-  universe_domain: process.env.universe_domain,
-};
+// Try to parse GOOGLE_CREDENTIALS if provided as a single JSON string
+let credentials;
+
+if (process.env.GOOGLE_CREDENTIALS) {
+  try {
+    credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS);
+    console.log("Loaded credentials from GOOGLE_CREDENTIALS env var.");
+  } catch (e) {
+    console.error("Failed to parse GOOGLE_CREDENTIALS:", e.message);
+  }
+}
+
+if (!credentials) {
+  credentials = {
+    type: process.env.type,
+    project_id: process.env.project_id,
+    private_key_id: process.env.private_key_id,
+    private_key: process.env.private_key
+      ? process.env.private_key.replace(/\\n/g, "\n")
+      : undefined,
+    client_email: process.env.client_email,
+    client_id: process.env.client_id,
+    auth_uri: process.env.auth_uri,
+    token_uri: process.env.token_uri,
+    auth_provider_x509_cert_url: process.env.auth_provider_x509_cert_url,
+    client_x509_cert_url: process.env.client_x509_cert_url,
+    universe_domain: process.env.universe_domain,
+  };
+}
 
 if (!credentials.private_key) {
   throw new Error("Google private_key missing");
 }
+
+// Log which credentials loaded (without exposing secrets)
+console.log("Credentials loaded for:", credentials.client_email);
+console.log("Project:", credentials.project_id);
 
 // ==============================
 // MAIN FUNCTION
@@ -124,7 +143,7 @@ async function main() {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Content-Length": data.length,
+        "Content-Length": Buffer.byteLength(data),
       },
     };
 
@@ -161,7 +180,7 @@ async function main() {
 // ==============================
 
 cron.schedule(
-  "0 8 * * *",
+  "55 10 * * *",
   () => {
     console.log("Running scheduled routine (8AM Bangladesh)...");
     main();
@@ -171,4 +190,28 @@ cron.schedule(
   }
 );
 
-console.log("Bot running. Scheduled for 8:00 AM Bangladesh time only.");
+// ==============================
+// HTTP SERVER (required for Railway)
+// ==============================
+
+const PORT = process.env.PORT || 3000;
+
+const server = http.createServer((req, res) => {
+  if (req.url === "/test") {
+    main();
+    res.writeHead(200, { "Content-Type": "text/plain" });
+    res.end("Message triggered manually!");
+  } else {
+    res.writeHead(200, { "Content-Type": "text/plain" });
+    res.end("Bot is running. Scheduled for 8:00 AM Bangladesh time.");
+  }
+});
+
+server.listen(PORT, () => {
+  console.log(`Server listening on port ${PORT}`);
+  console.log("Bot running. Scheduled for 8:00 AM Bangladesh time.");
+  // Send message immediately on deploy to verify it works
+  console.log("Sending initial message on startup...");
+  main();
+});
+
